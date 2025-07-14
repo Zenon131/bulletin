@@ -7,7 +7,6 @@
         CardTitle, 
         CardDescription, 
         CardContent,
-        Navbar,
         VoteControls
     } from '$lib/components/index.js';
     import { localStorageService } from '$lib/services/storage.js';
@@ -224,14 +223,6 @@
     </style>
 </svelte:head>
 
-<Navbar items={navItems}>
-    {#snippet children()}
-        <div class="flex items-center space-x-4">
-            <a href="https://github.com/Zenon131" target="_blank"> By JW </a>
-        </div>
-    {/snippet}
-</Navbar>
-
 <main class="container mx-auto px-4 py-8 mt-16">
     <div class="max-w-4xl mx-auto">
         <div class="text-center mb-12">
@@ -333,3 +324,4 @@
 
     </div>
 </main>
+

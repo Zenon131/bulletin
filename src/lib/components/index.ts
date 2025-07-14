@@ -14,3 +14,6 @@ export { default as VoteControls } from './VoteControls.svelte';
 
 // Types
 export type { CardProps } from './card-variants.js';
+
+// Footer Component
+export { default as Footer } from './Footer.svelte';
