@@ -43,7 +43,7 @@
         // { href: '/about', label: 'About', active: false }
     ];
 
-    let themeOfTheWeek = $state('Hot (Like Summer) Takes');
+    let themeOfTheWeek = $state('Fun Facts');
 
     // Sample engram data
     let engrams = $state<Engram[]>([]);
