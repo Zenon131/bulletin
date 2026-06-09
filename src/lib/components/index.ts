@@ -12,6 +12,12 @@ export { default as Navbar } from './Navbar.svelte';
 // Interaction Components
 export { default as VoteControls } from './VoteControls.svelte';
 
+// Form Components
+export { default as EngramFormCard } from './EngramFormCard.svelte';
+
+// Geotopic Components
+export { default as GeotopicSelector } from './GeotopicSelector.svelte';
+
 // Types
 export type { CardProps } from './card-variants.js';
 

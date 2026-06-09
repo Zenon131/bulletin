@@ -1,374 +1,399 @@
 import { supabase } from './supabase.js';
 import type { Engram } from '$lib/types/index.js';
 import { browser } from '$app/environment';
+import { leaderboardService } from './leaderboardService.js';
+import { contentFilter } from './contentFilter.js';
 
 // Function to get or create a device ID for anonymous use
 function getDeviceId(): string {
-    if (!browser) return 'server';
-    
-    let deviceId = localStorage.getItem('bulletin_device_id');
-    
-    if (!deviceId) {
-        deviceId = 'device_' + Math.random().toString(36).substring(2, 15) + 
-                   Math.random().toString(36).substring(2, 15);
-        localStorage.setItem('bulletin_device_id', deviceId);
-    }
-    
-    return deviceId;
+	if (!browser) return 'server';
+
+	let deviceId = localStorage.getItem('bulletin_device_id');
+
+	if (!deviceId) {
+		deviceId =
+			'device_' +
+			Math.random().toString(36).substring(2, 15) +
+			Math.random().toString(36).substring(2, 15);
+		localStorage.setItem('bulletin_device_id', deviceId);
+	}
+
+	return deviceId;
 }
 
 // Define vote interface
 interface Vote {
-    id: number;
-    engram_id: number;
-    device_id: string; // Changed from user_id to device_id
-    vote_type: 'up' | 'down';
-    created_at: string;
+	id: number;
+	engram_id: number;
+	device_id: string;
+	vote_type: 'up' | 'down';
+	created_at: string;
 }
 
 // Define extended Supabase Engram type with votes
 interface SupabaseEngram {
-    id: number;
-    title: string;
-    content: string;
-    device_id: string | null; // Changed from user_id to device_id
-    cluster?: string;
-    upvotes: number;
-    downvotes: number;
-    created_at: string;
-    votes?: Vote[];
+	id: number;
+	title: string;
+	content: string;
+	device_id: string | null;
+	cluster?: string;
+	geotopic_id?: number;
+	location_name?: string;
+	upvotes: number;
+	downvotes: number;
+	weekly_score: number;
+	status?: 'emerging' | 'active' | 'trending' | 'archived';
+	created_at: string;
+	votes?: Vote[];
+	geotopics?: {
+		id: number;
+		name: string;
+		slug: string;
+		description?: string;
+		location_name: string;
+		location_lat?: number;
+		location_lng?: number;
+		topic: string;
+		created_by: 'user' | 'ai';
+		post_count: number;
+		weekly_score: number;
+		status?: 'emerging' | 'active' | 'trending' | 'archived';
+		created_at: string;
+	};
+}
+
+function mapEngram(engram: SupabaseEngram, deviceId: string): Engram {
+	const userVote =
+		engram.votes?.find((vote: Vote) => vote.device_id === deviceId)?.vote_type || null;
+
+	return {
+		id: engram.id,
+		title: engram.title,
+		content: engram.content,
+		device_id: engram.device_id || undefined,
+		cluster: engram.cluster || 'general',
+		geotopic_id: engram.geotopic_id,
+		location_name: engram.location_name,
+		upvotes: engram.upvotes || 0,
+		downvotes: engram.downvotes || 0,
+		weekly_score: engram.weekly_score || 0,
+		createdAt: engram.created_at,
+		userVote,
+		geotopic: engram.geotopics
+			? {
+					id: engram.geotopics.id,
+					name: engram.geotopics.name,
+					slug: engram.geotopics.slug,
+					description: engram.geotopics.description,
+					location_name: engram.geotopics.location_name,
+					location_lat: engram.geotopics.location_lat,
+					location_lng: engram.geotopics.location_lng,
+					topic: engram.geotopics.topic,
+					created_by: engram.geotopics.created_by,
+					post_count: engram.geotopics.post_count || 0,
+					weekly_score: engram.geotopics.weekly_score || 0,
+					status: engram.geotopics.status || 'emerging',
+					createdAt: engram.geotopics.created_at
+				}
+			: undefined
+	};
 }
 
 /**
  * Service for handling Engram data operations via Supabase
  */
 export const supabaseService = {
-    /**
-     * Fetches all engrams from Supabase
-     * @param cluster Optional cluster filter
-     */
-    async getEngrams(cluster?: string): Promise<Engram[]> {
-        let query = supabase
-            .from('engrams')
-            .select('*, votes!votes_engram_id_fkey(*)');
+	/**
+	 * Fetches all engrams from Supabase
+	 * @param cluster Optional cluster filter
+	 * @param geotopicId Optional geotopic filter
+	 */
+	async getEngrams(cluster?: string, geotopicId?: number): Promise<Engram[]> {
+		let query = supabase
+			.from('engrams')
+			.select('*, votes!votes_engram_id_fkey(*), geotopics!engrams_geotopic_id_fkey(*)');
 
-        // Filter by cluster if provided
-        if (cluster && cluster !== 'all') {
-            query = query.eq('cluster', cluster);
-        }
+		// Filter by cluster if provided
+		if (cluster && cluster !== 'all') {
+			query = query.eq('cluster', cluster);
+		}
 
-        const { data, error } = await query.order('created_at', { ascending: false });
+		// Filter by geotopic if provided
+		if (geotopicId) {
+			query = query.eq('geotopic_id', geotopicId);
+		}
 
-        if (error) {
-            console.error('Error fetching engrams:', error);
-            return [];
-        }
+		const { data, error } = await query.order('created_at', { ascending: false });
 
-        // Get the current device ID for anonymous identification
-        const deviceId = getDeviceId();
+		if (error) {
+			console.error('Error fetching engrams:', error);
+			return [];
+		}
 
-        // Map the data to include the userVote field
-        const engrams = data.map((engram) => {
-                // Find the device's vote if it exists
-                const userVote = engram.votes?.find((vote: Vote) => vote.device_id === deviceId)?.vote_type || null;
-                
-            return {
-                id: engram.id,
-                title: engram.title,
-                content: engram.content,
-                device_id: engram.device_id,
-                cluster: engram.cluster || 'general',
-                upvotes: engram.upvotes || 0,
-                downvotes: engram.downvotes || 0,
-                createdAt: engram.created_at,
-                userVote
-            };
-        });
+		const deviceId = getDeviceId();
 
-        return engrams;
-    },
+		return (data || []).map((engram: SupabaseEngram) => mapEngram(engram, deviceId));
+	},
 
-    /**
-     * Fetches a single engram by ID
-     */
-    async getEngram(id: number): Promise<Engram | null> {
-        const { data, error } = await supabase
-            .from('engrams')
-            .select('*, votes!votes_engram_id_fkey(*)')
-            .eq('id', id)
-            .single();
+	/**
+	 * Fetches a single engram by ID
+	 */
+	async getEngram(id: number): Promise<Engram | null> {
+		const { data, error } = await supabase
+			.from('engrams')
+			.select('*, votes!votes_engram_id_fkey(*), geotopics!engrams_geotopic_id_fkey(*)')
+			.eq('id', id)
+			.single();
 
-        if (error || !data) {
-            console.error('Error fetching engram:', error);
-            return null;
-        }
+		if (error || !data) {
+			console.error('Error fetching engram:', error);
+			return null;
+		}
 
-        // Get the current device ID for anonymous identification
-        const deviceId = getDeviceId();
-        
-        // Find this device's vote if it exists
-        const userVote = data.votes?.find((vote: Vote) => vote.device_id === deviceId)?.vote_type || null;
+		const deviceId = getDeviceId();
+		return mapEngram(data as SupabaseEngram, deviceId);
+	},
 
-        return {
-            id: data.id,
-            title: data.title,
-            content: data.content,
-            device_id: data.device_id,
-            cluster: data.cluster || 'general',
-            upvotes: data.upvotes || 0,
-            downvotes: data.downvotes || 0,
-            createdAt: data.created_at,
-            userVote
-        };
-    },
+	/**
+	 * Adds a new engram
+	 */
+	async addEngram({
+		title,
+		content,
+		cluster = 'general',
+		geotopic_id,
+		location_name
+	}: {
+		title: string;
+		content: string;
+		cluster?: string;
+		geotopic_id?: number;
+		location_name?: string;
+	}): Promise<Engram | null> {
+		// Server-side content filter safety net
+		const filterResult = contentFilter.check(`${title} ${content}`);
+		if (!filterResult.clean) {
+			console.error('Content filter blocked post:', filterResult.matched);
+			return null;
+		}
 
-    /**
-     * Adds a new engram
-     */
-    async addEngram({ 
-        title, 
-        content, 
-        cluster = 'general' 
-    }: { 
-        title: string; 
-        content: string; 
-        cluster?: string; 
-    }): Promise<Engram | null> {
-        // Get device ID for anonymous posting
-        const deviceId = getDeviceId();
-        
-        // Prepare the insert data
-        const insertData = {
-            title,
-            content,
-            cluster,
-            device_id: deviceId,
-            upvotes: 0,
-            downvotes: 0
-        };
+		const deviceId = getDeviceId();
 
-        const { data, error } = await supabase
-            .from('engrams')
-            .insert(insertData)
-            .select()
-            .single();
+		const insertData = {
+			title,
+			content,
+			cluster,
+			geotopic_id: geotopic_id || null,
+			location_name: location_name || null,
+			device_id: deviceId,
+			upvotes: 0,
+			downvotes: 0,
+			weekly_score: 500 // Start with full recency bonus
+		};
 
-        if (error || !data) {
-            console.error('Error adding engram:', error);
-            return null;
-        }
+		const { data, error } = await supabase
+			.from('engrams')
+			.insert(insertData)
+			.select('*, geotopics!engrams_geotopic_id_fkey(*)')
+			.single();
 
-        // Map to Engram type
-        return {
-            id: data.id,
-            title: data.title,
-            content: data.content,
-            device_id: data.device_id,
-            cluster: data.cluster || 'general',
-            upvotes: data.upvotes || 0,
-            downvotes: data.downvotes || 0,
-            createdAt: data.created_at,
-            userVote: null
-        };
-    },
+		if (error || !data) {
+			console.error('Error adding engram:', error);
+			return null;
+		}
 
-    /**
-     * Updates an existing engram
-     */
-    async updateEngram(
-        id: number, 
-        { 
-            title, 
-            content, 
-            cluster 
-        }: { 
-            title?: string; 
-            content?: string; 
-            cluster?: string; 
-        }
-    ): Promise<Engram | null> {
-        const updateData: Record<string, string> = {};
-        if (title !== undefined) updateData.title = title;
-        if (content !== undefined) updateData.content = content;
-        if (cluster !== undefined) updateData.cluster = cluster;
+		// Increment post count on geotopic if applicable
+		if (geotopic_id) {
+			const { data: geotopic } = await supabase
+				.from('geotopics')
+				.select('post_count')
+				.eq('id', geotopic_id)
+				.single();
 
-        const { data, error } = await supabase
-            .from('engrams')
-            .update(updateData)
-            .eq('id', id)
-            .select()
-            .single();
+			if (geotopic) {
+				await supabase
+					.from('geotopics')
+					.update({ post_count: (geotopic.post_count || 0) + 1 })
+					.eq('id', geotopic_id);
+			}
+		}
 
-        if (error || !data) {
-            console.error('Error updating engram:', error);
-            return null;
-        }
+		return mapEngram(data as SupabaseEngram, deviceId);
+	},
 
-        // Get the current device ID
-        const deviceId = getDeviceId();
+	/**
+	 * Updates an existing engram
+	 */
+	async updateEngram(
+		id: number,
+		{
+			title,
+			content,
+			cluster,
+			geotopic_id,
+			location_name
+		}: {
+			title?: string;
+			content?: string;
+			cluster?: string;
+			geotopic_id?: number;
+			location_name?: string;
+		}
+	): Promise<Engram | null> {
+		const updateData: Record<string, string | number | null> = {};
+		if (title !== undefined) updateData.title = title;
+		if (content !== undefined) updateData.content = content;
+		if (cluster !== undefined) updateData.cluster = cluster;
+		if (geotopic_id !== undefined) updateData.geotopic_id = geotopic_id;
+		if (location_name !== undefined) updateData.location_name = location_name;
 
-        // Get this device's vote if it exists
-        let userVote = null;
-        const { data: voteData } = await supabase
-            .from('votes')
-            .select('vote_type')
-            .eq('engram_id', id)
-            .eq('device_id', deviceId)
-            .single();
-        
-        userVote = voteData?.vote_type || null;
+		const { data, error } = await supabase
+			.from('engrams')
+			.update(updateData)
+			.eq('id', id)
+			.select('*, geotopics!engrams_geotopic_id_fkey(*)')
+			.single();
 
-        // Map to Engram type
-        return {
-            id: data.id,
-            title: data.title,
-            content: data.content,
-            device_id: data.device_id,
-            cluster: data.cluster || 'general',
-            upvotes: data.upvotes || 0,
-            downvotes: data.downvotes || 0,
-            createdAt: data.created_at,
-            userVote
-        };
-    },
+		if (error || !data) {
+			console.error('Error updating engram:', error);
+			return null;
+		}
 
-    /**
-     * Deletes an engram by ID
-     */
-    async deleteEngram(id: number): Promise<boolean> {
-        const { error } = await supabase
-            .from('engrams')
-            .delete()
-            .eq('id', id);
+		const deviceId = getDeviceId();
+		return mapEngram(data as SupabaseEngram, deviceId);
+	},
 
-        if (error) {
-            console.error('Error deleting engram:', error);
-            return false;
-        }
+	/**
+	 * Deletes an engram by ID
+	 */
+	async deleteEngram(id: number): Promise<boolean> {
+		const { error } = await supabase.from('engrams').delete().eq('id', id);
 
-        return true;
-    },
+		if (error) {
+			console.error('Error deleting engram:', error);
+			return false;
+		}
 
-    /**
-     * Vote on an engram (upvote or downvote)
-     */
-    async voteEngram(id: number, direction: 'up' | 'down'): Promise<Engram | null> {
-        // Get the current device ID for anonymous voting
-        const deviceId = getDeviceId();
+		return true;
+	},
 
-        // Get current engram to check vote status
-        const { data: currentEngram, error: fetchError } = await supabase
-            .from('engrams')
-            .select('*')
-            .eq('id', id)
-            .single();
+	/**
+	 * Vote on an engram (upvote or downvote)
+	 */
+	async voteEngram(id: number, direction: 'up' | 'down'): Promise<Engram | null> {
+		const deviceId = getDeviceId();
 
-        if (fetchError || !currentEngram) {
-            console.error('Error fetching engram for voting:', fetchError);
-            return null;
-        }
+		const { data: currentEngram, error: fetchError } = await supabase
+			.from('engrams')
+			.select('*')
+			.eq('id', id)
+			.single();
 
-        // Check if this device has already voted
-        const { data: existingVote } = await supabase
-            .from('votes')
-            .select('*')
-            .eq('engram_id', id)
-            .eq('device_id', deviceId)
-            .single();
+		if (fetchError || !currentEngram) {
+			console.error('Error fetching engram for voting:', fetchError);
+			return null;
+		}
 
-        // Begin transaction to update votes
-        let updateFields: Record<string, number | { upvotes: number; downvotes: number }> = {};
-        let userVote: 'up' | 'down' | null = direction;
+		const { data: existingVote } = await supabase
+			.from('votes')
+			.select('*')
+			.eq('engram_id', id)
+			.eq('device_id', deviceId)
+			.single();
 
-        if (!existingVote) {
-            // No previous vote, add a new one
-            const { error: voteError } = await supabase
-                .from('votes')
-                .insert({
-                    engram_id: id,
-                    device_id: deviceId,
-                    vote_type: direction
-                });
+		let updateFields: Record<string, number> = {};
+		let userVote: 'up' | 'down' | null = direction;
 
-            if (voteError) {
-                console.error('Error adding vote:', voteError);
-                return null;
-            }
+		if (!existingVote) {
+			const { error: voteError } = await supabase.from('votes').insert({
+				engram_id: id,
+				device_id: deviceId,
+				vote_type: direction
+			});
 
-            // Update engram vote counts
-            updateFields = direction === 'up'
-                ? { upvotes: (currentEngram.upvotes || 0) + 1 }
-                : { downvotes: (currentEngram.downvotes || 0) + 1 };
-        } 
-        else if (existingVote.vote_type === direction) {
-            // Device is toggling their vote off
-            const { error: deleteError } = await supabase
-                .from('votes')
-                .delete()
-                .eq('engram_id', id)
-                .eq('device_id', deviceId);
+			if (voteError) {
+				console.error('Error adding vote:', voteError);
+				return null;
+			}
 
-            if (deleteError) {
-                console.error('Error removing vote:', deleteError);
-                return null;
-            }
+			updateFields =
+				direction === 'up'
+					? { upvotes: (currentEngram.upvotes || 0) + 1 }
+					: { downvotes: (currentEngram.downvotes || 0) + 1 };
+		} else if (existingVote.vote_type === direction) {
+			const { error: deleteError } = await supabase
+				.from('votes')
+				.delete()
+				.eq('engram_id', id)
+				.eq('device_id', deviceId);
 
-            // Update engram vote counts
-            updateFields = direction === 'up'
-                ? { upvotes: Math.max(0, (currentEngram.upvotes || 0) - 1) }
-                : { downvotes: Math.max(0, (currentEngram.downvotes || 0) - 1) };
-                
-            userVote = null;
-        } 
-        else {
-            // Device is changing their vote from up to down or vice versa
-            const { error: updateError } = await supabase
-                .from('votes')
-                .update({ vote_type: direction })
-                .eq('engram_id', id)
-                .eq('device_id', deviceId);
+			if (deleteError) {
+				console.error('Error removing vote:', deleteError);
+				return null;
+			}
 
-            if (updateError) {
-                console.error('Error updating vote:', updateError);
-                return null;
-            }
+			updateFields =
+				direction === 'up'
+					? { upvotes: Math.max(0, (currentEngram.upvotes || 0) - 1) }
+					: { downvotes: Math.max(0, (currentEngram.downvotes || 0) - 1) };
 
-            // Update engram vote counts
-            updateFields = direction === 'up'
-                ? { 
-                    upvotes: (currentEngram.upvotes || 0) + 1,
-                    downvotes: Math.max(0, (currentEngram.downvotes || 0) - 1)
-                }
-                : {
-                    upvotes: Math.max(0, (currentEngram.upvotes || 0) - 1),
-                    downvotes: (currentEngram.downvotes || 0) + 1
-                };
-        }
+			userVote = null;
+		} else {
+			const { error: updateError } = await supabase
+				.from('votes')
+				.update({ vote_type: direction })
+				.eq('engram_id', id)
+				.eq('device_id', deviceId);
 
-        // Update the engram with new vote counts
-        const { data: updatedEngram, error: updateError } = await supabase
-            .from('engrams')
-            .update(updateFields)
-            .eq('id', id)
-            .select()
-            .single();
+			if (updateError) {
+				console.error('Error updating vote:', updateError);
+				return null;
+			}
 
-        if (updateError) {
-            console.error('Error updating engram votes:', updateError);
-            return null;
-        }
+			updateFields =
+				direction === 'up'
+					? {
+							upvotes: (currentEngram.upvotes || 0) + 1,
+							downvotes: Math.max(0, (currentEngram.downvotes || 0) - 1)
+						}
+					: {
+							upvotes: Math.max(0, (currentEngram.upvotes || 0) - 1),
+							downvotes: (currentEngram.downvotes || 0) + 1
+						};
+		}
 
-        // Return the updated engram with device vote
-        return {
-            id: updatedEngram.id,
-            title: updatedEngram.title,
-            content: updatedEngram.content,
-            device_id: updatedEngram.device_id,
-            cluster: updatedEngram.cluster || 'general',
-            upvotes: updatedEngram.upvotes || 0,
-            downvotes: updatedEngram.downvotes || 0,
-            createdAt: updatedEngram.created_at,
-            userVote
-        };
-    }
+		// Recompute weekly score after vote change
+		const newUpvotes =
+			updateFields.upvotes !== undefined ? updateFields.upvotes : currentEngram.upvotes;
+		const newDownvotes =
+			updateFields.downvotes !== undefined ? updateFields.downvotes : currentEngram.downvotes;
+		const tempEngram: Engram = {
+			id: currentEngram.id,
+			title: currentEngram.title,
+			content: currentEngram.content,
+			device_id: currentEngram.device_id,
+			cluster: currentEngram.cluster,
+			geotopic_id: currentEngram.geotopic_id,
+			location_name: currentEngram.location_name,
+			upvotes: newUpvotes || 0,
+			downvotes: newDownvotes || 0,
+			weekly_score: currentEngram.weekly_score || 0,
+			createdAt: currentEngram.created_at
+		};
+		updateFields.weekly_score = leaderboardService.computeWeeklyScore(tempEngram);
+
+		const { data: updatedEngram, error: updateError } = await supabase
+			.from('engrams')
+			.update(updateFields)
+			.eq('id', id)
+			.select('*, geotopics!engrams_geotopic_id_fkey(*)')
+			.single();
+
+		if (updateError) {
+			console.error('Error updating engram votes:', updateError);
+			return null;
+		}
+
+		return mapEngram(updatedEngram as SupabaseEngram, deviceId);
+	}
 };
