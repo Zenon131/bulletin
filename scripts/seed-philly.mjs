@@ -172,8 +172,8 @@ function parseRSSItems(xml, source) {
 
 		if (title && (description || title)) {
 			items.push({
-				title: stripHtml(title).trim(),
-				content: stripHtml(description || title).trim(),
+				title: sanitizeText(stripHtml(title).trim()),
+				content: sanitizeText(stripHtml(description || title).trim()),
 				pubDate: pubDate ? new Date(pubDate) : new Date(),
 				link: link || '',
 				source: source.name,
@@ -207,6 +207,16 @@ function stripHtml(html) {
 		.replace(/&gt;/g, '>')
 		.replace(/&quot;/g, '"')
 		.replace(/&#\d+;/g, '')
+		.trim();
+}
+
+function sanitizeText(text) {
+	// Remove null bytes and control chars that break JSON/Postgres
+	return text
+		.replace(/\x00/g, '')
+		.replace(/[\x01-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '')
+		.replace(/[\uD800-\uDFFF]/g, '') // surrogate pairs
+		.replace(/\uFFFD/g, '') // replacement char
 		.trim();
 }
 
@@ -1159,7 +1169,8 @@ function generateHyperlocalPosts(geotopics, count) {
 
 		if (!isClean(content)) continue;
 
-		const title = content.slice(0, 60).replace(/\s+$/g, '');
+		content = sanitizeText(content);
+		const title = sanitizeText(content.slice(0, 60).replace(/\s+$/g, ''));
 		const upvotes = randInt(0, 50);
 		const downvotes = randInt(0, Math.max(0, upvotes - randInt(3, 10)));
 		const hoursAgo = randInt(0, 14 * 24);
@@ -1231,7 +1242,8 @@ function generatePosts(geotopics, items, count) {
 			content = `Saw this on ${item.source}: ${item.title}`;
 		}
 
-		const title = content.slice(0, 60).replace(/\s+$/g, '');
+		content = sanitizeText(content);
+		const title = sanitizeText(content.slice(0, 60).replace(/\s+$/g, ''));
 		const upvotes = randInt(0, 45);
 		const downvotes = randInt(0, Math.max(0, upvotes - randInt(2, 8)));
 		const hoursAgo = randInt(0, 30 * 24);
