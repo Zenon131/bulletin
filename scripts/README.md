@@ -1,6 +1,31 @@
 # Bulletin Content Seeding
 
-## Quick Start
+## 🔔 Philly Real-Content Seeder (Recommended)
+
+Fetches actual Philadelphia news/events from RSS feeds and seeds them as realistic discussion posts. Best for a Philly-only launch.
+
+```bash
+# Preview what would be created
+node scripts/seed-philly.mjs --posts 200
+
+# Clean old data and insert 200 real Philly posts
+node scripts/seed-philly.mjs --go --clean --posts 200
+
+# Just insert (keep existing data)
+node scripts/seed-philly.mjs --go --posts 200
+```
+
+**What it does:**
+1. Fetches current articles from [Billy Penn](https://billypenn.com) RSS feed
+2. Maps articles to Philly geotopics (Food, Events, Music, Politics, etc.)
+3. Generates discussion prompts like "Anyone else hear about...?" or "Just saw this:"
+4. Backdates posts over the last 30 days for an organic feel
+
+---
+
+## Synthetic Multi-City Seeder
+
+For testing with fake content across 19 cities:
 
 ```bash
 # Preview what would be created (dry-run — no DB writes)
