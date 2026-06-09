@@ -1151,7 +1151,7 @@ function generateHyperlocalPosts(geotopics, count) {
 		// Vary with neighborhood references
 		if (chance(0.3)) {
 			const hood = pick(NEIGHBORHOODS);
-			content = content.replace(/university city|uc/gi, hood);
+			content = content.replace(/\buniversity city\b|\buc\b/gi, hood);
 		}
 		if (chance(0.3)) {
 			content += pick(['', ' 😭', ' 💀', ' 😂', ' 🙏', ' 👀', ' 🔥', ' 🤔']);
