@@ -12,7 +12,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
-import { readFileSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync, unlinkSync } from 'fs';
 import { resolve } from 'path';
 
 // ── CLI args ───────────────────────────────────────────────────────
@@ -20,6 +20,7 @@ const args = process.argv.slice(2);
 const GO = args.includes('--go');
 const TARGET_POSTS = Number(parseArg('--posts') ?? 500);
 const CLEAN_SLATE = args.includes('--clean');
+const DRIP_DAYS = Number(parseArg('--drip-days') ?? 0);
 const BATCH_SIZE = 500;
 
 function parseArg(flag) {
@@ -1151,7 +1152,9 @@ function generateHyperlocalPosts(geotopics, count) {
 		{ length: 500 },
 		(_, i) => `seed_device_${i.toString(36).padStart(4, '0')}`
 	);
-	const geoMap = new Map(geotopics.map((g) => [g.topic, g]));
+	const geoMap = new Map(
+		geotopics.filter((g) => g.location_name === 'Philadelphia').map((g) => [g.topic, g])
+	);
 
 	for (let i = 0; i < count; i++) {
 		const base = pick(HYPERLOCAL_POSTS);
@@ -1203,7 +1206,9 @@ function generatePosts(geotopics, items, count) {
 		(_, i) => `seed_device_${i.toString(36).padStart(4, '0')}`
 	);
 
-	const geoMap = new Map(geotopics.map((g) => [g.topic, g]));
+	const geoMap = new Map(
+		geotopics.filter((g) => g.location_name === 'Philadelphia').map((g) => [g.topic, g])
+	);
 	const usedContent = new Set(); // dedupe
 
 	for (let i = 0; i < count; i++) {
@@ -1274,10 +1279,29 @@ function generatePosts(geotopics, items, count) {
 async function cleanSlate() {
 	if (!GO || !CLEAN_SLATE) return;
 	console.log('🧹 Cleaning old seed data...');
-	await supabase.from('votes').delete().neq('id', 0);
-	await supabase.from('engrams').delete().neq('id', 0);
-	await supabase.from('geotopics').delete().neq('id', 0);
-	console.log('   ✓ Database wiped.');
+	// Only clean votes and engrams via REST; skip geotopics if too many ghosts
+	const tables = ['votes', 'engrams'];
+	for (const table of tables) {
+		let deleted = 0;
+		while (true) {
+			const { data } = await supabase.from(table).select('id').limit(500);
+			if (!data || data.length === 0) break;
+			const ids = data.map((r) => r.id);
+			const { error } = await supabase.from(table).delete().in('id', ids);
+			if (error) {
+				console.error(`   ${table} delete error:`, error.message);
+				break;
+			}
+			deleted += ids.length;
+			process.stdout.write(`   ${table}: ${deleted} deleted\r`);
+		}
+		console.log(`\n   ✓ ${table} cleared (${deleted} rows)`);
+	}
+	// Soft-delete geotopics by creating fresh ones with new IDs
+	console.log(
+		'   ℹ️  Skipping geotopics bulk delete (too slow for ghosts). New Philly geotopics will be created with fresh IDs.'
+	);
+	console.log('   ✓ Database wiped (engrams + votes cleared).');
 }
 
 // ── Seed geotopics ───────────────────────────────────────────────
@@ -1446,9 +1470,120 @@ async function main() {
 	console.log('   🔔 Philly Human Content Seeder');
 	console.log(`   Mode: ${GO ? 'LIVE INSERT' : 'DRY-RUN (preview only)'}`);
 	console.log(`   Target: ${TARGET_POSTS} posts`);
+	if (DRIP_DAYS > 0) console.log(`   Drip: ${DRIP_DAYS} days`);
 	if (CLEAN_SLATE) console.log('   Clean slate: YES');
 	console.log('═══════════════════════════════════════════════════\n');
 
+	const queuePath = resolve(process.cwd(), 'scripts/.drip-queue.json');
+
+	// ── DRIP MODE ─────────────────────────────────────────────────────
+	if (DRIP_DAYS > 0) {
+		if (!GO) {
+			console.log('💡 Dry-run drip preview:');
+			console.log(
+				`   Would create a queue of ${TARGET_POSTS} posts spread over ${DRIP_DAYS} days.`
+			);
+			console.log(`   Run with --go to actually create the queue and insert Day 1.`);
+			process.exit(0);
+		}
+
+		// Clear data if requested (only on first run)
+		if (CLEAN_SLATE && !existsSync(queuePath)) await cleanSlate();
+
+		let queue;
+		let dayIndex = 0;
+
+		// Load existing queue if present
+		if (existsSync(queuePath)) {
+			const raw = readFileSync(queuePath, 'utf-8');
+			queue = JSON.parse(raw);
+			dayIndex = queue.progress || 0;
+			console.log(`📦 Found existing queue. Already completed: ${dayIndex} / ${DRIP_DAYS} days`);
+		} else {
+			// Fresh start: create geotopics, generate all posts, save queue
+			const geotopics = await seedGeotopics();
+			const loadedGeotopics = await loadGeotopics();
+
+			const items = await fetchAllContent();
+			if (items.length === 0) {
+				console.error('\n❌ No content fetched.');
+				process.exit(1);
+			}
+
+			const newsPosts = generatePosts(loadedGeotopics, items, Math.ceil(TARGET_POSTS * 0.25));
+			const localPosts = generateHyperlocalPosts(loadedGeotopics, Math.floor(TARGET_POSTS * 0.75));
+			let posts = [...newsPosts, ...localPosts].sort(() => Math.random() - 0.5);
+
+			// Trim to exact target
+			posts = posts.slice(0, TARGET_POSTS);
+
+			// Backdate posts evenly across the drip window
+			const msPerDay = 24 * 60 * 60 * 1000;
+			const now = Date.now();
+			const windowStart = now - DRIP_DAYS * msPerDay;
+			for (let i = 0; i < posts.length; i++) {
+				// Even distribution across the full window
+				const fraction = i / posts.length;
+				const base = windowStart + fraction * (DRIP_DAYS * msPerDay);
+				const jitter = (Math.random() - 0.5) * msPerDay * 0.3; // +/- 3.6h jitter
+				posts[i].created_at = new Date(
+					Math.max(windowStart, Math.min(now, base + jitter))
+				).toISOString();
+			}
+
+			// Sort by date so we drip chronologically
+			posts.sort((a, b) => new Date(a.created_at).getTime() - new Date(b.created_at).getTime());
+
+			// Chunk into days
+			const perDay = Math.ceil(posts.length / DRIP_DAYS);
+			const chunks = [];
+			for (let i = 0; i < DRIP_DAYS; i++) {
+				chunks.push(posts.slice(i * perDay, (i + 1) * perDay));
+			}
+
+			queue = {
+				total: posts.length,
+				days: DRIP_DAYS,
+				chunks,
+				progress: 0
+			};
+			writeFileSync(queuePath, JSON.stringify(queue, null, 2));
+			console.log(`📦 Queue created: ${posts.length} posts across ${DRIP_DAYS} days`);
+		}
+
+		if (dayIndex >= DRIP_DAYS) {
+			console.log('\n✅ All drip days already completed.');
+			console.log(`   rm ${queuePath}`);
+			process.exit(0);
+		}
+
+		const chunk = queue.chunks[dayIndex];
+		const loadedGeotopics = await loadGeotopics();
+		console.log(`\n🌧️  Day ${dayIndex + 1} of ${DRIP_DAYS}: inserting ${chunk.length} posts...`);
+		console.log(
+			`   Date range: ${chunk[0].created_at.slice(0, 10)} → ${chunk[chunk.length - 1].created_at.slice(0, 10)}`
+		);
+
+		const insertedIds = await insertPosts(chunk);
+		await insertVotes(insertedIds);
+		await updatePostCounts(loadedGeotopics);
+
+		queue.progress = dayIndex + 1;
+		writeFileSync(queuePath, JSON.stringify(queue, null, 2));
+
+		const remaining = DRIP_DAYS - (dayIndex + 1);
+		console.log(`\n✅ Day ${dayIndex + 1} complete. ${remaining} day(s) remaining.`);
+		if (remaining > 0) {
+			console.log(`   ⏳ Run again tomorrow:`);
+			console.log(`      node scripts/seed-philly.mjs --go --drip-days ${DRIP_DAYS}`);
+		} else {
+			console.log('\n🎉 Drip campaign complete!');
+			console.log(`   rm ${queuePath}`);
+		}
+		return;
+	}
+
+	// ── NORMAL (immediate) MODE ───────────────────────────────────────
 	if (CLEAN_SLATE) await cleanSlate();
 
 	const geotopics = await seedGeotopics();
@@ -1460,8 +1595,8 @@ async function main() {
 		process.exit(1);
 	}
 
-	const newsPosts = generatePosts(loadedGeotopics, items, Math.ceil(TARGET_POSTS * 0.6));
-	const localPosts = generateHyperlocalPosts(loadedGeotopics, Math.floor(TARGET_POSTS * 0.4));
+	const newsPosts = generatePosts(loadedGeotopics, items, Math.ceil(TARGET_POSTS * 0.25));
+	const localPosts = generateHyperlocalPosts(loadedGeotopics, Math.floor(TARGET_POSTS * 0.75));
 	const posts = [...newsPosts, ...localPosts].sort(() => Math.random() - 0.5);
 	const insertedIds = await insertPosts(posts);
 	await insertVotes(insertedIds);
