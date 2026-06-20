@@ -1,5 +1,5 @@
 import { supabase } from './supabase.js';
-import type { Engram } from '$lib/types/index.js';
+import type { Engram, Reply } from '$lib/types/index.js';
 import { browser } from '$app/environment';
 import { leaderboardService } from './leaderboardService.js';
 import { contentFilter } from './contentFilter.js';
@@ -39,6 +39,7 @@ interface SupabaseEngram {
 	cluster?: string;
 	geotopic_id?: number;
 	location_name?: string;
+	contact_info?: string | null;
 	upvotes: number;
 	downvotes: number;
 	weekly_score: number;
@@ -62,7 +63,7 @@ interface SupabaseEngram {
 	};
 }
 
-function mapEngram(engram: SupabaseEngram, deviceId: string): Engram {
+function mapEngram(engram: SupabaseEngram, deviceId: string, replies: Reply[] = []): Engram {
 	const userVote =
 		engram.votes?.find((vote: Vote) => vote.device_id === deviceId)?.vote_type || null;
 
@@ -74,11 +75,13 @@ function mapEngram(engram: SupabaseEngram, deviceId: string): Engram {
 		cluster: engram.cluster || 'general',
 		geotopic_id: engram.geotopic_id,
 		location_name: engram.location_name,
+		contact_info: engram.contact_info || undefined,
 		upvotes: engram.upvotes || 0,
 		downvotes: engram.downvotes || 0,
 		weekly_score: engram.weekly_score || 0,
 		createdAt: engram.created_at,
 		userVote,
+		replies,
 		geotopic: engram.geotopics
 			? {
 					id: engram.geotopics.id,
@@ -104,35 +107,75 @@ function mapEngram(engram: SupabaseEngram, deviceId: string): Engram {
  */
 export const supabaseService = {
 	/**
-	 * Fetches all engrams from Supabase
+	 * Fetches engrams from Supabase with optional pagination.
+	 * Fetches one extra row to determine if more pages exist.
 	 * @param cluster Optional cluster filter
 	 * @param geotopicId Optional geotopic filter
+	 * @param limit Maximum rows to return
+	 * @param offset Number of rows to skip
 	 */
-	async getEngrams(cluster?: string, geotopicId?: number): Promise<Engram[]> {
+	async getEngrams(
+		cluster?: string,
+		geotopicId?: number,
+		limit = 50,
+		offset = 0
+	): Promise<{ posts: Engram[]; hasMore: boolean }> {
+		const fetchLimit = limit + 1;
+
 		let query = supabase
 			.from('engrams')
-			.select('*, votes!votes_engram_id_fkey(*), geotopics!engrams_geotopic_id_fkey(*)');
+			.select('*, votes!votes_engram_id_fkey(*), geotopics!engrams_geotopic_id_fkey(*)')
+			.order('created_at', { ascending: false })
+			.range(offset, offset + fetchLimit - 1);
 
-		// Filter by cluster if provided
 		if (cluster && cluster !== 'all') {
 			query = query.eq('cluster', cluster);
 		}
 
-		// Filter by geotopic if provided
 		if (geotopicId) {
 			query = query.eq('geotopic_id', geotopicId);
 		}
 
-		const { data, error } = await query.order('created_at', { ascending: false });
+		const { data, error } = await query;
 
 		if (error) {
 			console.error('Error fetching engrams:', error);
-			return [];
+			return { posts: [], hasMore: false };
 		}
+
+		const rows = (data || []) as SupabaseEngram[];
+		const hasMore = rows.length > limit;
+		const pageRows = rows.slice(0, limit);
 
 		const deviceId = getDeviceId();
 
-		return (data || []).map((engram: SupabaseEngram) => mapEngram(engram, deviceId));
+		// Fetch all replies for returned engrams in a single batch
+		const engramIds = pageRows.map((e) => e.id);
+		const repliesMap = new Map<number, Reply[]>();
+		if (engramIds.length > 0) {
+			const { data: replyData } = await supabase
+				.from('replies')
+				.select('*')
+				.in('engram_id', engramIds)
+				.order('created_at', { ascending: true });
+			(replyData || []).forEach((r) => {
+				const list = repliesMap.get(r.engram_id) || [];
+				list.push({
+					id: r.id,
+					engram_id: r.engram_id,
+					device_id: r.device_id,
+					content: r.content,
+					createdAt: r.created_at
+				});
+				repliesMap.set(r.engram_id, list);
+			});
+		}
+
+		const posts = pageRows.map((engram: SupabaseEngram) =>
+			mapEngram(engram, deviceId, repliesMap.get(engram.id) || [])
+		);
+
+		return { posts, hasMore };
 	},
 
 	/**
@@ -151,7 +194,22 @@ export const supabaseService = {
 		}
 
 		const deviceId = getDeviceId();
-		return mapEngram(data as SupabaseEngram, deviceId);
+
+		// Fetch replies for this engram
+		const { data: replyData } = await supabase
+			.from('replies')
+			.select('*')
+			.eq('engram_id', id)
+			.order('created_at', { ascending: true });
+		const replies = (replyData || []).map((r) => ({
+			id: r.id,
+			engram_id: r.engram_id,
+			device_id: r.device_id,
+			content: r.content,
+			createdAt: r.created_at
+		}));
+
+		return mapEngram(data as SupabaseEngram, deviceId, replies);
 	},
 
 	/**
@@ -162,13 +220,15 @@ export const supabaseService = {
 		content,
 		cluster = 'general',
 		geotopic_id,
-		location_name
+		location_name,
+		contact_info
 	}: {
 		title: string;
 		content: string;
 		cluster?: string;
 		geotopic_id?: number;
 		location_name?: string;
+		contact_info?: string;
 	}): Promise<Engram | null> {
 		// Server-side content filter safety net
 		const filterResult = contentFilter.check(`${title} ${content}`);
@@ -185,6 +245,7 @@ export const supabaseService = {
 			cluster,
 			geotopic_id: geotopic_id || null,
 			location_name: location_name || null,
+			contact_info: contact_info || null,
 			device_id: deviceId,
 			upvotes: 0,
 			downvotes: 0,
@@ -395,5 +456,67 @@ export const supabaseService = {
 		}
 
 		return mapEngram(updatedEngram as SupabaseEngram, deviceId);
+	},
+
+	/**
+	 * Fetches replies for an engram
+	 */
+	async getReplies(engramId: number): Promise<Reply[]> {
+		const { data, error } = await supabase
+			.from('replies')
+			.select('*')
+			.eq('engram_id', engramId)
+			.order('created_at', { ascending: true });
+
+		if (error) {
+			console.error('Error fetching replies:', error);
+			return [];
+		}
+
+		return (data || []).map((r) => ({
+			id: r.id,
+			engram_id: r.engram_id,
+			device_id: r.device_id,
+			content: r.content,
+			createdAt: r.created_at
+		}));
+	},
+
+	/**
+	 * Adds a reply to an engram
+	 */
+	async addReply(engramId: number, content: string): Promise<Reply | null> {
+		if (!content.trim()) return null;
+
+		const filterResult = contentFilter.check(content);
+		if (!filterResult.clean) {
+			console.error('Content filter blocked reply:', filterResult.matched);
+			return null;
+		}
+
+		const deviceId = getDeviceId();
+
+		const { data, error } = await supabase
+			.from('replies')
+			.insert({
+				engram_id: engramId,
+				content: content.trim(),
+				device_id: deviceId
+			})
+			.select('*')
+			.single();
+
+		if (error || !data) {
+			console.error('Error adding reply:', error);
+			return null;
+		}
+
+		return {
+			id: data.id,
+			engram_id: data.engram_id,
+			device_id: data.device_id,
+			content: data.content,
+			createdAt: data.created_at
+		};
 	}
 };

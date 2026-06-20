@@ -6,6 +6,7 @@
 	import { geotopicService } from '$lib/services/geotopicService.js';
 	import { leaderboardService } from '$lib/services/leaderboardService.js';
 	import { userHistoryService } from '$lib/services/userHistoryService.js';
+	import { contentFilter } from '$lib/services/contentFilter.js';
 	import EngramFormCard from '$lib/components/EngramFormCard.svelte';
 	import { onMount } from 'svelte';
 	import type { Engram, Geotopic } from '$lib/types/index.js';
@@ -29,41 +30,44 @@
 	}
 
 	let engrams = $state<Engram[]>([]);
-	let displayedEngrams = $state<Engram[]>([]);
 	let geotopics = $state<Geotopic[]>([]);
 	let loading = $state(true);
+	let loadingMore = $state(false);
 	let selectedGeotopicId = $state<number | undefined>(undefined);
 	let trendingPosts = $state<Engram[]>([]);
-	let pageSize = $state(50);
-	let currentPage = $state(0);
+	const PAGE_SIZE = 50;
+	let hasMore = $state(false);
 
-	async function fetchEngrams(geotopicId = selectedGeotopicId) {
-		loading = true;
+	async function fetchEngrams(geotopicId = selectedGeotopicId, append = false) {
+		if (append) {
+			loadingMore = true;
+		} else {
+			loading = true;
+		}
 		try {
-			const data = await supabaseService.getEngrams(undefined, geotopicId);
-			engrams = data;
-			displayedEngrams = data.slice(0, pageSize);
-			currentPage = 1;
+			const offset = append ? engrams.length : 0;
+			const { posts, hasMore: more } = await supabaseService.getEngrams(
+				undefined,
+				geotopicId,
+				PAGE_SIZE,
+				offset
+			);
+			hasMore = more;
+			engrams = append ? [...engrams, ...posts] : posts;
 		} catch (error) {
 			console.error('Error fetching engrams:', error);
-			if (browser && localStorageService.isAvailable()) {
+			if (!append && browser && localStorageService.isAvailable()) {
 				engrams = localStorageService.getEngrams();
-				displayedEngrams = engrams.slice(0, pageSize);
 			}
 		} finally {
 			loading = false;
+			loadingMore = false;
 		}
 	}
 
-	function loadMore() {
-		const nextPage = currentPage + 1;
-		const endIndex = nextPage * pageSize;
-		displayedEngrams = engrams.slice(0, endIndex);
-		currentPage = nextPage;
-	}
-
-	function hasMorePosts() {
-		return displayedEngrams.length < engrams.length;
+	async function loadMore() {
+		if (loadingMore || !hasMore) return;
+		await fetchEngrams(selectedGeotopicId, true);
 	}
 
 	async function fetchTrending() {
@@ -92,7 +96,8 @@
 		title: string,
 		content: string,
 		geotopic_id?: number,
-		location_name?: string
+		location_name?: string,
+		contact_info?: string
 	) => {
 		if (!title || !content) {
 			console.error('Cannot add engram: missing title or content');
@@ -104,7 +109,8 @@
 				title,
 				content,
 				geotopic_id,
-				location_name
+				location_name,
+				contact_info
 			});
 
 			if (newEngram) {
@@ -112,7 +118,6 @@
 					userHistoryService.recordPost(newEngram.geotopic_id);
 				}
 				engrams = [newEngram, ...engrams];
-				displayedEngrams = [newEngram, ...displayedEngrams.slice(0, pageSize - 1)];
 				await fetchGeotopics();
 				return newEngram;
 			}
@@ -128,12 +133,59 @@
 			const updatedEngram = await supabaseService.voteEngram(id, direction);
 			if (updatedEngram) {
 				engrams = engrams.map((engram) => (engram.id === id ? updatedEngram : engram));
-				displayedEngrams = displayedEngrams.map((engram) =>
-					engram.id === id ? updatedEngram : engram
-				);
 			}
 		} catch (error) {
 			console.error('Error voting on engram:', error);
+		}
+	}
+
+	// Reply state
+	let expandedReplies = $state<Set<number>>(new Set());
+	let replyTexts = $state<Record<number, string>>({});
+	let replyErrors = $state<Record<number, string>>({});
+	let replyWarnings = $state<Record<number, string>>({});
+
+	function replyWarningFor(id: number, text: string) {
+		const result = contentFilter.check(text);
+		if (!result.clean) {
+			replyWarnings = {
+				...replyWarnings,
+				[id]: `Inappropriate language detected: "${result.matched}". Please revise.`
+			};
+		} else {
+			replyWarnings = { ...replyWarnings, [id]: '' };
+		}
+	}
+
+	function toggleReplies(id: number) {
+		const next = new Set(expandedReplies);
+		if (next.has(id)) next.delete(id);
+		else next.add(id);
+		expandedReplies = next;
+	}
+
+	async function submitReply(engramId: number) {
+		const text = replyTexts[engramId]?.trim();
+		if (!text) return;
+		const filterResult = contentFilter.check(text);
+		if (!filterResult.clean) {
+			replyErrors = {
+				...replyErrors,
+				[engramId]: `Reply blocked: inappropriate language (${filterResult.matched}).`
+			};
+			return;
+		}
+		replyErrors = { ...replyErrors, [engramId]: '' };
+		replyWarnings = { ...replyWarnings, [engramId]: '' };
+		const newReply = await supabaseService.addReply(engramId, text);
+		if (newReply) {
+			replyTexts = { ...replyTexts, [engramId]: '' };
+			engrams = engrams.map((e) => {
+				if (e.id !== engramId) return e;
+				return { ...e, replies: [...(e.replies || []), newReply] };
+			});
+		} else {
+			replyErrors = { ...replyErrors, [engramId]: 'Failed to post reply.' };
 		}
 	}
 
@@ -242,7 +294,7 @@
 
 		<!-- Posts grid -->
 		<div class="mb-12 grid gap-5 md:grid-cols-2 lg:grid-cols-3">
-			{#each displayedEngrams as engram (engram.id)}
+			{#each engrams as engram (engram.id)}
 				<Card class="overflow-hidden">
 					{#snippet children()}
 						<div class="px-5 pt-5 pb-3">
@@ -291,6 +343,11 @@
 						<CardContent class="px-5 pt-0 pb-4">
 							{#snippet children()}
 								<p class="text-[15px] leading-relaxed">{engram.content}</p>
+								{#if engram.contact_info}
+									<p class="mt-2 text-xs text-[hsl(var(--muted-foreground))]">
+										📬 {engram.contact_info}
+									</p>
+								{/if}
 							{/snippet}
 						</CardContent>
 
@@ -304,27 +361,82 @@
 										onVote={(direction) => handleVote(engram.id, direction)}
 									/>
 
-									<span class="text-xs text-[hsl(var(--muted-foreground))]">
-										{new Date(engram.createdAt).toLocaleDateString()}
-									</span>
+									<div class="flex items-center gap-3">
+										<button
+											type="button"
+											class="text-xs text-[hsl(var(--muted-foreground))] hover:text-black"
+											onclick={() => toggleReplies(engram.id)}
+										>
+											💬 {engram.replies?.length || 0}
+										</button>
+										<span class="text-xs text-[hsl(var(--muted-foreground))]">
+											{new Date(engram.createdAt).toLocaleDateString()}
+										</span>
+									</div>
 								</div>
 							{/snippet}
 						</CardFooter>
+
+						{#if expandedReplies.has(engram.id)}
+							<div class="border-t border-black/5 px-5 py-3">
+								{#if engram.replies && engram.replies.length > 0}
+									<div class="mb-3 space-y-2">
+										{#each engram.replies as reply}
+											<div class="rounded-lg bg-black/5 px-3 py-2">
+												<p class="text-sm leading-snug">{reply.content}</p>
+												<p class="mt-1 text-[10px] text-[hsl(var(--muted-foreground))]">
+													{new Date(reply.createdAt).toLocaleDateString()}
+												</p>
+											</div>
+										{/each}
+									</div>
+								{/if}
+								<div class="flex items-end gap-2">
+									<textarea
+										placeholder="Reply..."
+										value={replyTexts[engram.id] || ''}
+										oninput={(e) => {
+											replyTexts = {
+												...replyTexts,
+												[engram.id]: e.currentTarget.value
+											};
+											replyWarningFor(engram.id, e.currentTarget.value);
+										}}
+										class="min-h-8 w-full resize-none rounded-lg bg-black/5 px-3 py-2 text-sm focus:outline-none"
+									></textarea>
+									<button
+										type="button"
+										disabled={!!replyWarnings[engram.id]}
+										class="flex h-8 items-center rounded-lg bg-black px-3 text-xs font-medium text-white disabled:bg-black/30 disabled:opacity-60"
+										onclick={() => submitReply(engram.id)}
+									>
+										Send
+									</button>
+								</div>
+								{#if replyWarnings[engram.id]}
+									<p class="mt-1 text-xs text-amber-600">{replyWarnings[engram.id]}</p>
+								{/if}
+								{#if replyErrors[engram.id]}
+									<p class="mt-1 text-xs text-red-600">{replyErrors[engram.id]}</p>
+								{/if}
+							</div>
+						{/if}
 					{/snippet}
 				</Card>
 			{/each}
 		</div>
 
-		{#if hasMorePosts()}
+		{#if hasMore}
 			<div class="mb-12 text-center">
 				<button
 					onclick={loadMore}
-					class="rounded-full bg-black px-6 py-2.5 text-sm font-medium text-white transition-all hover:brightness-110 active:scale-95"
+					disabled={loadingMore}
+					class="rounded-full bg-black px-6 py-2.5 text-sm font-medium text-white transition-all hover:brightness-110 active:scale-95 disabled:bg-black/50"
 				>
-					Load more posts
+					{loadingMore ? 'Loading...' : 'Load more posts'}
 				</button>
 				<p class="mt-2 text-xs text-[hsl(var(--muted-foreground))]">
-					Showing {displayedEngrams.length} of {engrams.length} posts
+					Showing {engrams.length} posts
 				</p>
 			</div>
 		{/if}

@@ -13,7 +13,8 @@
 			title: string,
 			content: string,
 			geotopic_id?: number,
-			location_name?: string
+			location_name?: string,
+			contact_info?: string
 		) => void;
 		class?: string;
 		initialGeotopics?: Geotopic[];
@@ -27,6 +28,7 @@
 	let locationHint = $state('');
 	let submitError = $state('');
 	let contentWarning = $state('');
+	let contactInfo = $state('');
 
 	function handleGeotopicSelect(geotopic: Geotopic | null, loc: string) {
 		selectedGeotopic = geotopic;
@@ -70,11 +72,12 @@
 
 		try {
 			const title = generateTitle(content);
-			onSubmit(title, content, selectedGeotopic?.id, effectiveLocation);
+			onSubmit(title, content, selectedGeotopic?.id, effectiveLocation, contactInfo || undefined);
 
 			content = '';
 			selectedGeotopic = null;
 			locationName = '';
+			contactInfo = '';
 		} catch (error) {
 			console.error('Error submitting form:', error);
 		}
@@ -116,6 +119,13 @@
 				class="placeholder:text-muted-foreground/40 min-h-20 w-full resize-none border-none bg-transparent text-base leading-relaxed focus:ring-0 focus:outline-none"
 			></textarea>
 
+			<input
+				type="text"
+				placeholder="Contact (optional): email, IG, phone..."
+				bind:value={contactInfo}
+				class="w-full rounded-full border border-black/10 bg-black/5 px-3 py-1.5 text-xs text-[hsl(var(--muted-foreground))] placeholder:text-[hsl(var(--muted-foreground))]/40 focus:border-black/30 focus:outline-none"
+			/>
+
 			<GeotopicSelector
 				{content}
 				{initialGeotopics}
@@ -138,7 +148,7 @@
 				type="submit"
 				aria-label="Post"
 				disabled={!!contentWarning}
-				class="absolute right-5 bottom-4 z-10 flex h-10 w-10 items-center justify-center rounded-full text-white  shadow-2xl transition-all duration-200 hover:brightness-110 active:scale-90 {content.trim() &&
+				class="absolute right-5 bottom-4 z-10 flex h-10 w-10 items-center justify-center rounded-full text-white shadow-2xl transition-all duration-200 hover:brightness-110 active:scale-90 {content.trim() &&
 				!contentWarning
 					? 'translate-y-0 bg-transparent opacity-100'
 					: 'pointer-events-none translate-y-2 bg-black/30 opacity-0'}"

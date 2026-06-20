@@ -4,6 +4,26 @@
 
 Fetches actual Philadelphia news/events from RSS feeds and seeds them as realistic discussion posts. Best for a Philly-only launch.
 
+### Drip campaign (recommended for launch)
+
+```bash
+# 1. Preview what would be created
+node scripts/seed-philly.mjs --posts 25000 --drip-days 7
+
+# 2. Create the queue and insert Day 1
+node scripts/seed-philly.mjs --go --posts 25000 --drip-days 7
+
+# 3. Run again on each following day to insert that day's batch
+node scripts/seed-philly.mjs --go --drip-days 7
+
+# 4. When complete, delete the local queue file
+rm scripts/.drip-queue.json
+```
+
+The queue state lives in `scripts/.drip-queue.json` (already ignored by `.gitignore`).
+
+### One-shot seeding
+
 ```bash
 # Preview what would be created
 node scripts/seed-philly.mjs --posts 200

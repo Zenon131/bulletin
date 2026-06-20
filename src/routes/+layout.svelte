@@ -2,10 +2,11 @@
 	import '../app.css';
 	import Navbar from '$lib/components/Navbar.svelte';
 	import Footer from '$lib/components/Footer.svelte';
+	import { ScrollToTop } from '$lib/components/index.js';
 
 	// Props for this layout component
 	let { children, data } = $props();
-	
+
 	// Default title that can be overridden by individual pages
 	let title = 'Bulletin';
 </script>
@@ -21,4 +22,5 @@
 		{@render children()}
 	</main>
 	<Footer />
+	<ScrollToTop />
 </div>

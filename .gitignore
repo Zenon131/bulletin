@@ -28,3 +28,6 @@ vite.config.ts.timestamp-*
 .new
 .old
 .bak
+
+# Local seed state
+scripts/.drip-queue.json

@@ -11,11 +11,13 @@ export interface Engram {
 	cluster?: string;
 	geotopic_id?: number;
 	location_name?: string;
+	contact_info?: string;
 	upvotes: number;
 	downvotes: number;
 	weekly_score: number;
 	userVote?: 'up' | 'down' | null;
 	geotopic?: Geotopic;
+	replies?: Reply[];
 }
 
 export interface Geotopic {
@@ -31,6 +33,14 @@ export interface Geotopic {
 	post_count: number;
 	weekly_score: number;
 	status: 'emerging' | 'active' | 'trending' | 'archived';
+	createdAt: string;
+}
+
+export interface Reply {
+	id: number;
+	engram_id: number;
+	device_id: string;
+	content: string;
 	createdAt: string;
 }
 
@@ -55,9 +65,18 @@ export interface SupabaseEngramRow {
 	cluster: string | null;
 	geotopic_id: number | null;
 	location_name: string | null;
+	contact_info: string | null;
 	upvotes: number | null;
 	downvotes: number | null;
 	weekly_score: number | null;
+	created_at: string;
+}
+
+export interface SupabaseReplyRow {
+	id: number;
+	engram_id: number;
+	device_id: string;
+	content: string;
 	created_at: string;
 }
 
@@ -121,6 +140,11 @@ export interface Database {
 				Row: SupabaseLeaderboardSnapshotRow;
 				Insert: Omit<SupabaseLeaderboardSnapshotRow, 'id' | 'created_at'>;
 				Update: Partial<Omit<SupabaseLeaderboardSnapshotRow, 'id' | 'created_at'>>;
+			};
+			replies: {
+				Row: SupabaseReplyRow;
+				Insert: Omit<SupabaseReplyRow, 'id' | 'created_at'>;
+				Update: Partial<Omit<SupabaseReplyRow, 'id' | 'created_at'>>;
 			};
 		};
 	};
