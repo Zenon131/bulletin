@@ -284,10 +284,6 @@
 			<div class="flex items-center">
 				{#if loading}
 					<div class="text-xs text-[hsl(var(--muted-foreground))]">Loading posts...</div>
-				{:else}
-					<p class="text-xs text-[hsl(var(--muted-foreground))]">
-						<strong class="text-[hsl(var(--foreground))]">{engrams.length}</strong> posts
-					</p>
 				{/if}
 			</div>
 		</div>
@@ -435,9 +431,6 @@
 				>
 					{loadingMore ? 'Loading...' : 'Load more posts'}
 				</button>
-				<p class="mt-2 text-xs text-[hsl(var(--muted-foreground))]">
-					Showing {engrams.length} posts
-				</p>
 			</div>
 		{/if}
 

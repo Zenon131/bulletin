@@ -265,7 +265,6 @@
 			<!-- All posts -->
 			<div class="mb-6">
 				<h2 class="mb-4 text-lg font-semibold">Recent Posts</h2>
-				<p class="text-xs text-[hsl(var(--muted-foreground))]">{engrams.length} total</p>
 			</div>
 
 			<div class="grid gap-6 md:grid-cols-2">
@@ -388,9 +387,6 @@
 					>
 						{loadingMore ? 'Loading...' : 'Load more posts'}
 					</button>
-					<p class="mt-2 text-xs text-[hsl(var(--muted-foreground))]">
-						Showing {engrams.length} posts
-					</p>
 				</div>
 			{/if}
 		</div>
