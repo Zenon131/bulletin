@@ -42,7 +42,7 @@
 
 			geotopic = topic;
 
-			const [{ posts, hasMore: more }] = await Promise.all([
+			const [{ posts, hasMore: more }, trending] = await Promise.all([
 				supabaseService.getEngrams(undefined, topic.id, PAGE_SIZE, 0),
 				leaderboardService.getWeeklyLeaderboard(10)
 			]);
@@ -377,20 +377,22 @@
 						{/snippet}
 					</Card>
 				{/each}
-				{#if hasMore}
-					<div class="mb-12 text-center">
-						<button
-							onclick={loadMore}
-							disabled={loadingMore}
-							class="rounded-full bg-black px-6 py-2.5 text-sm font-medium text-white transition-all hover:brightness-110 active:scale-95 disabled:bg-black/50"
-						>
-							{loadingMore ? 'Loading...' : 'Load more posts'}
-						</button>
-						<p class="mt-2 text-xs text-[hsl(var(--muted-foreground))]">
-							Showing {engrams.length} posts
-						</p>
-					</div>
-				{/if}
 			</div>
-		{/if}
-	</main>
+
+			{#if hasMore}
+				<div class="mb-12 text-center">
+					<button
+						onclick={loadMore}
+						disabled={loadingMore}
+						class="rounded-full bg-black px-6 py-2.5 text-sm font-medium text-white transition-all hover:brightness-110 active:scale-95 disabled:bg-black/50"
+					>
+						{loadingMore ? 'Loading...' : 'Load more posts'}
+					</button>
+					<p class="mt-2 text-xs text-[hsl(var(--muted-foreground))]">
+						Showing {engrams.length} posts
+					</p>
+				</div>
+			{/if}
+		</div>
+	{/if}
+</main>

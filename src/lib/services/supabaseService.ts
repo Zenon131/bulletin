@@ -120,13 +120,11 @@ export const supabaseService = {
 		limit = 50,
 		offset = 0
 	): Promise<{ posts: Engram[]; hasMore: boolean }> {
-		const fetchLimit = limit + 1;
-
 		let query = supabase
 			.from('engrams')
 			.select('*, votes!votes_engram_id_fkey(*), geotopics!engrams_geotopic_id_fkey(*)')
 			.order('created_at', { ascending: false })
-			.range(offset, offset + fetchLimit - 1);
+			.range(offset, offset + limit - 1);
 
 		if (cluster && cluster !== 'all') {
 			query = query.eq('cluster', cluster);
@@ -144,8 +142,8 @@ export const supabaseService = {
 		}
 
 		const rows = (data || []) as SupabaseEngram[];
-		const hasMore = rows.length > limit;
-		const pageRows = rows.slice(0, limit);
+		const hasMore = rows.length === limit;
+		const pageRows = rows;
 
 		const deviceId = getDeviceId();
 
