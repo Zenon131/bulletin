@@ -36,6 +36,7 @@
 	let selectedGeotopicId = $state<number | undefined>(undefined);
 	let trendingPosts = $state<Engram[]>([]);
 	const PAGE_SIZE = 50;
+	const MAX_LOADED_POSTS = 300;
 	let hasMore = $state(false);
 
 	async function fetchEngrams(geotopicId = selectedGeotopicId, append = false) {
@@ -67,6 +68,10 @@
 
 	async function loadMore() {
 		if (loadingMore || !hasMore) return;
+		if (engrams.length >= MAX_LOADED_POSTS) {
+			hasMore = false;
+			return;
+		}
 		await fetchEngrams(selectedGeotopicId, true);
 	}
 
@@ -230,7 +235,11 @@
 				>
 					Trending Geotopics
 				</h2>
-				<a href="/explore" class="text-sm font-medium text-black hover:underline">Explore all →</a>
+				<a
+					href="/explore"
+					data-sveltekit-preload-data="hover"
+					class="text-sm font-medium text-black hover:underline">Explore all →</a
+				>
 			</div>
 			<div class="flex gap-2 overflow-x-auto pb-2">
 				<button
@@ -297,6 +306,7 @@
 							{#if engram.geotopic}
 								<a
 									href={`/geotopic/${engram.geotopic.slug}`}
+									data-sveltekit-preload-data="hover"
 									class="inline-flex items-center gap-1 text-xs font-medium text-black hover:underline"
 								>
 									<svg
@@ -442,13 +452,19 @@
 						<span class="text-xl">🔥</span>
 						<h2 class="text-lg font-bold">Trending This Week</h2>
 					</div>
-					<a href="/leaderboard" class="text-sm font-medium text-black hover:underline"
-						>View all →</a
+					<a
+						href="/leaderboard"
+						data-sveltekit-preload-data="hover"
+						class="text-sm font-medium text-black hover:underline">View all →</a
 					>
 				</div>
 				<div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
 					{#each trendingPosts.slice(0, 3) as post, i}
-						<a href={`/geotopic/${post.geotopic?.slug || ''}`} class="group block">
+						<a
+							href={`/geotopic/${post.geotopic?.slug || ''}`}
+							data-sveltekit-preload-data="hover"
+							class="group block"
+						>
 							<div
 								class="rounded-[1.5rem] border border-white/40 bg-white/60 p-5 shadow-xl backdrop-blur-xl transition-all hover:bg-white/70 hover:shadow-2xl"
 							>

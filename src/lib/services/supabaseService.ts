@@ -122,7 +122,10 @@ export const supabaseService = {
 	): Promise<{ posts: Engram[]; hasMore: boolean }> {
 		let query = supabase
 			.from('engrams')
-			.select('*, votes!votes_engram_id_fkey(*), geotopics!engrams_geotopic_id_fkey(*)')
+			.select(
+				'id, title, content, device_id, cluster, geotopic_id, location_name, contact_info, upvotes, downvotes, weekly_score, created_at, geotopics!engrams_geotopic_id_fkey(id, name, slug, description, location_name, location_lat, location_lng, topic, created_by, post_count, weekly_score, status, created_at)',
+				{ count: 'exact' }
+			)
 			.order('created_at', { ascending: false })
 			.range(offset, offset + limit - 1);
 
@@ -134,7 +137,7 @@ export const supabaseService = {
 			query = query.eq('geotopic_id', geotopicId);
 		}
 
-		const { data, error } = await query;
+		const { data, error, count } = await query;
 
 		if (error) {
 			console.error('Error fetching engrams:', error);
@@ -142,13 +145,27 @@ export const supabaseService = {
 		}
 
 		const rows = (data || []) as SupabaseEngram[];
-		const hasMore = rows.length === limit;
+		const totalCount = count ?? rows.length;
+		const hasMore = offset + rows.length < totalCount;
 		const pageRows = rows;
 
 		const deviceId = getDeviceId();
 
-		// Fetch all replies for returned engrams in a single batch
+		// Fetch only the current device's votes for this page's posts
 		const engramIds = pageRows.map((e) => e.id);
+		const votesMap = new Map<number, 'up' | 'down'>();
+		if (engramIds.length > 0 && deviceId !== 'server') {
+			const { data: voteData } = await supabase
+				.from('votes')
+				.select('engram_id, vote_type')
+				.in('engram_id', engramIds)
+				.eq('device_id', deviceId);
+			(voteData || []).forEach((v) => {
+				votesMap.set(v.engram_id, v.vote_type as 'up' | 'down');
+			});
+		}
+
+		// Fetch all replies for returned engrams in a single batch
 		const repliesMap = new Map<number, Reply[]>();
 		if (engramIds.length > 0) {
 			const { data: replyData } = await supabase
@@ -169,9 +186,10 @@ export const supabaseService = {
 			});
 		}
 
-		const posts = pageRows.map((engram: SupabaseEngram) =>
-			mapEngram(engram, deviceId, repliesMap.get(engram.id) || [])
-		);
+		const posts = pageRows.map((engram: SupabaseEngram) => ({
+			...mapEngram(engram, deviceId, repliesMap.get(engram.id) || []),
+			userVote: votesMap.get(engram.id) || null
+		}));
 
 		return { posts, hasMore };
 	},

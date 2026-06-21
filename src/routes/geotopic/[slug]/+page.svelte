@@ -26,6 +26,7 @@
 	let hasMore = $state(false);
 	let loadingMore = $state(false);
 	const PAGE_SIZE = 50;
+	const MAX_LOADED_POSTS = 300;
 
 	const slug = $derived(page.params.slug);
 
@@ -158,6 +159,10 @@
 
 	async function loadMore() {
 		if (loadingMore || !hasMore || !geotopic) return;
+		if (engrams.length >= MAX_LOADED_POSTS) {
+			hasMore = false;
+			return;
+		}
 		loadingMore = true;
 		try {
 			const { posts, hasMore: more } = await supabaseService.getEngrams(

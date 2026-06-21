@@ -1,6 +1,13 @@
 import { supabase } from './supabase.js';
 import type { Geotopic } from '$lib/types/index.js';
 
+const cache = new Map<string, { data: Geotopic[]; expiresAt: number }>();
+const CACHE_TTL_MS = 60_000;
+
+function cacheKey(options?: Record<string, unknown>): string {
+	return JSON.stringify(options ?? {});
+}
+
 export const geotopicService = {
 	async getGeotopics(options?: {
 		location?: string;
@@ -11,6 +18,12 @@ export const geotopicService = {
 		status?: ('emerging' | 'active' | 'trending' | 'archived')[];
 		limit?: number;
 	}): Promise<Geotopic[]> {
+		const key = cacheKey(options);
+		const cached = cache.get(key);
+		if (cached && cached.expiresAt > Date.now()) {
+			return cached.data;
+		}
+
 		let query = supabase.from('geotopics').select('*');
 
 		if (options?.search) {
@@ -52,7 +65,7 @@ export const geotopicService = {
 			return [];
 		}
 
-		return (data || []).map((g) => ({
+		const result = (data || []).map((g) => ({
 			id: g.id,
 			name: g.name,
 			slug: g.slug,
@@ -67,6 +80,9 @@ export const geotopicService = {
 			status: g.status || 'emerging',
 			createdAt: g.created_at
 		}));
+
+		cache.set(key, { data: result, expiresAt: Date.now() + CACHE_TTL_MS });
+		return result;
 	},
 
 	async getGeotopicBySlug(slug: string): Promise<Geotopic | null> {

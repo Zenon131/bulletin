@@ -76,6 +76,7 @@
 					{#each allItems as item}
 						<a
 							href={item.href}
+							data-sveltekit-preload-data="hover"
 							class={cn(
 								'relative rounded-full px-3 py-1.5 text-sm font-medium transition-colors',
 								item.active
@@ -89,6 +90,7 @@
 					{#each items as item}
 						<a
 							href={item.href}
+							data-sveltekit-preload-data="hover"
 							class={cn(
 								'relative rounded-full px-3 py-1.5 text-sm font-medium transition-colors',
 								item.active
