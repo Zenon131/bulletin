@@ -19,7 +19,7 @@
 
 	async function loadData() {
 		loading = true;
-		const [topics, fresh, posts] = await Promise.all([
+		const [topics, fresh, { posts }] = await Promise.all([
 			geotopicService.getGeotopics({
 				location: searchLocation || undefined,
 				topic: searchTopic || undefined,
@@ -29,11 +29,11 @@
 				recent: true,
 				limit: 8
 			}),
-			supabaseService.getEngrams()
+			supabaseService.getEngrams(undefined, undefined, 20)
 		]);
 		geotopics = topics;
 		recentGeotopics = fresh;
-		recentPosts = posts.slice(0, 20);
+		recentPosts = posts;
 
 		aiDiscoveries = aiSuggester.discoverFromPosts(
 			recentPosts.map((p) => ({ title: p.title, content: p.content }))
