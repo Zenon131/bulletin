@@ -12,7 +12,6 @@
 	async function loadLeaderboard() {
 		loading = true;
 		try {
-			await leaderboardService.refreshScores();
 			const data = await leaderboardService.getWeeklyLeaderboard(100);
 			leaderboard = data;
 			lastUpdated = new Date();
